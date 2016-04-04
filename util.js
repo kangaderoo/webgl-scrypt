@@ -15,8 +15,8 @@ ___ = {
   uint16_array_to_hex: function(arr) {
     var hex = '';
     for (var i = 0; i < arr.length; i++) {
-      hex += ___.byte_to_hex(arr[i] >>>  8);
-      hex += ___.byte_to_hex(arr[i]       );
+      hex += ___.byte_to_hex(arr[i] >>>   8);
+      hex += ___.byte_to_hex(arr[i]        );
     }
     return hex;
   }

@@ -7,6 +7,7 @@ vec2 sftr (in vec2 a, in float shift)
     return ret;
 }
 
+
 vec2 blend (in vec2 m16, in vec2 m15, in vec2 m07, in vec2 m02)
 {
     vec2 s0 = xor (rotr (m15   , POW_2_07), xor (rotr (m15.yx, POW_2_02), sftr (m15, POW_2_03)));
@@ -18,47 +19,46 @@ vec2 blend (in vec2 m16, in vec2 m15, in vec2 m07, in vec2 m02)
 uniform sampler2D uSampler;
 varying vec2 vTextCoord;
 
-uniform float round;
+uniform int round;
 
 //Start position for work block in texture
-float start;
+int start;
 // Round offset related to the block offset
-float inBlockOffset;
+int inBlockOffset;
 //Work array
-vec2 w[8];
+vec2 w[2];
 
-vec4 _(in float offset) {
-    vec2 coordinate = vec2(mod(start + offset, TEXTURE_SIZE), floor((start + offset)/TEXTURE_SIZE));
-    return texture2D(uSampler, coordinate / TEXTURE_SIZE);
+vec4 _(in int offset) {
+	 float loc = float(start+offset);
+    vec2 coordinate = vec2(floor(mod(loc, float(TEXTURE_SIZE))), floor(loc/float(TEXTURE_SIZE)));
+    return texture2D(uSampler, coordinate / float(TEXTURE_SIZE));
 }
 
-vec2 e(in float offset) {
-    vec4 rgba = _(offset + inBlockOffset)*255.;
-
+vec2 e(in int offset) {
+    vec4 rgba = floor(_(offset + inBlockOffset)*e255);
     float x = ((rgba.r * 256.) + rgba.g);
     float y = ((rgba.b * 256.) + rgba.a);
     return vec2(x, y);
 }
 
-#define PREDEFINED_BLOCKS 16.
-#define WORKS_PER_ROUND 2.
-#define F_TMP_WORK_OFFSET float(TMP_WORK_OFFSET)
+#define PREDEFINED_BLOCKS 16
+#define WORKS_PER_ROUND 2
 
 void main () {
-    vec4 c = gl_FragCoord - 0.5;
-    float position = (c.y * TEXTURE_SIZE) + c.x;
-    float offset = mod(position, BLOCK_SIZE);
-    float block = floor(position / BLOCK_SIZE);
+    vec4 c = floor(gl_FragCoord);
+    int position = int(c.y) * TEXTURE_SIZE + int(c.x);
+    int offset = int(mod(float(position), float(BLOCK_SIZE))+0.5);
+    int block = position / BLOCK_SIZE;
 
     inBlockOffset = PREDEFINED_BLOCKS + (round * WORKS_PER_ROUND);
-    if ( offset >= (F_TMP_WORK_OFFSET + inBlockOffset) && offset < (F_TMP_WORK_OFFSET + inBlockOffset + WORKS_PER_ROUND)) {
-        start = (block * BLOCK_SIZE) + F_TMP_WORK_OFFSET;
+    if ( offset >= (TMP_WORK_OFFSET + inBlockOffset) && offset < (TMP_WORK_OFFSET + inBlockOffset + WORKS_PER_ROUND)) {
+        start = block * BLOCK_SIZE + TMP_WORK_OFFSET;
 
-        w[0] = blend(e(-16.), e(-15.), e(-7.), e(-2.));
-        w[1] = blend(e(-15.), e(-14.), e(-6.), e(-1.));
+        w[0] = blend(e(-16), e(-15), e(-7), e(-2));
+        w[1] = blend(e(-15), e(-14), e(-6), e(-1));
 
-        for (int i = 0; i < int(WORKS_PER_ROUND); i++ ) {
-            if ( offset == (F_TMP_WORK_OFFSET + inBlockOffset + float(i))) {
+        for (int i = 0; i < WORKS_PER_ROUND; i++ ) {
+            if ( offset == (TMP_WORK_OFFSET + inBlockOffset + i)) {
                 gl_FragColor = toRGBA(w[i]);
                 break;
             }

@@ -29,57 +29,57 @@ uniform sampler2D uSampler;
 uniform sampler2D kSampler;
 varying vec2 vTextCoord;
 
-uniform float round;
+uniform int round;
 
 //Start position for hash block in texture
-float start;
+int start;
 
-vec4 _(in float offset) {
-    vec2 coordinate = vec2(mod(start + offset, TEXTURE_SIZE), floor((start + offset)/TEXTURE_SIZE));
-    return texture2D(uSampler, coordinate / TEXTURE_SIZE);
+vec4 _(in int offset) {
+	 float loc = float(start+offset);
+    vec2 coordinate = vec2(floor(mod(loc, float(TEXTURE_SIZE))), floor(loc/float(TEXTURE_SIZE)));
+    return texture2D(uSampler, coordinate / float(TEXTURE_SIZE));
 }
 
 vec2 fromRGBA(vec4 rgba) {
-    rgba *= 255.;
+    rgba = floor(rgba*e255);
     float x = ((rgba.r * 256.) + rgba.g);
     float y = ((rgba.b * 256.) + rgba.a);
     return vec2(x, y);
 }
 
-vec2 e(in float offset) {
+vec2 e(in int offset) {
     return fromRGBA(_(offset));
 }
 
-vec2 K(in float offset) {
-    return fromRGBA(texture2D(kSampler, vec2(offset/64., 0.)));
+vec2 K(in int offset) {
+    return fromRGBA(texture2D(kSampler, vec2(float(offset)/64., 0.)));
 }
 
-#define TMP_BLOCK_OFFSET 8.
-#define WORKS_PER_ROUND 2.
-#define F_TMP_HASH_OFFSET float(TMP_HASH_OFFSET)
+#define TMP_BLOCK_OFFSET 8
+#define WORKS_PER_ROUND 8
 
 void main () {
-    vec4 c = gl_FragCoord - 0.5;
-    float position = (c.y * TEXTURE_SIZE) + c.x;
-    float offset = mod(position, BLOCK_SIZE);
-    float block = floor(position / BLOCK_SIZE);
+    vec4 c = floor(gl_FragCoord);
+    int position = int(c.y) * TEXTURE_SIZE + int(c.x);
+    int offset = int(mod(float(position), float(BLOCK_SIZE))+0.5);
+    int block = position / BLOCK_SIZE;
 
-    if ( offset >= F_TMP_HASH_OFFSET && offset < (F_TMP_HASH_OFFSET + 8.)) {
-        start = (block * BLOCK_SIZE) + F_TMP_HASH_OFFSET;
-        float rOffset = (round*WORKS_PER_ROUND) + F_TMP_HASH_OFFSET;
+    if ( offset >= TMP_HASH_OFFSET && offset < TMP_HASH_OFFSET + 8) {
+        start = block * BLOCK_SIZE + TMP_HASH_OFFSET;
+        int rOffset = round * WORKS_PER_ROUND + TMP_HASH_OFFSET;
 
         vec2 t[8]; //Work array
         vec2 t1, t2;
         vec2 _s0,_maj,_t2,_s1,_ch, _t1;
-        for(int i = 0; i < 8; i++) { t[i] = e(float(i)); }
+        for(int i = 0; i < 8; i++) { t[i] = e(i); }
 
-        for(int i = 0; i < int(WORKS_PER_ROUND); i++) {
+        for(int i = 0; i < WORKS_PER_ROUND; i++) {
             _s0 = e0(t[0]);
             _maj = maj(t[0],t[1],t[2]);
             _t2 = safe_add(_s0, _maj);
             _s1 = e1(t[4]);
             _ch = ch(t[4], t[5], t[6]);
-            _t1 = safe_add(safe_add(safe_add(safe_add(t[7], _s1), _ch), K(float(i)+rOffset)), e(float(i) + TMP_BLOCK_OFFSET + rOffset));
+            _t1 = safe_add(safe_add(safe_add(safe_add(t[7], _s1), _ch), K(i+rOffset)), e(i + TMP_BLOCK_OFFSET + rOffset));
 
             t[7] = t[6]; t[6] = t[5]; t[5] = t[4];
             t[4] = safe_add(t[3], _t1);
@@ -88,7 +88,7 @@ void main () {
         }
 
         for (int i = 0; i < 8; i++ ) {
-            if ( offset == (F_TMP_HASH_OFFSET + float(i))) {
+            if ( offset == TMP_HASH_OFFSET + i) {
                 gl_FragColor = toRGBA(t[i]);
                 break;
             }

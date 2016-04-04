@@ -1,8 +1,11 @@
 precision mediump float;
 
 #define Ox10000 65536.0
+// Redefinition of 65536 to fix resolution errors in multiplying with floats
+#define eOx10000 65536.000005
 #define Ox8000  32768.0
-
+#define OxZERO 0.0
+#define OxONE  1.0
 #define Ox5c5c 23644.0
 #define Ox3636 13878.0
 
@@ -20,6 +23,12 @@ precision mediump float;
 #define POW_2_12 4096.0
 #define POW_2_13 8192.0
 #define POW_2_14 16384.0
+
+#define BLOCK_SIZE 33012
+#define F_BLOCK_SIZE 33012.
+#define TEXTURE_SIZE %%TEXTURE_SIZE%%
+// Redefinition of 255 to fix resolution errors in multiplying with floats
+#define e255 255.001
 
 #define TMP_HASH_OFFSET          0
 #define TMP_HASH_OFFSET_END      8
@@ -47,24 +56,20 @@ precision mediump float;
 #define TEMP_HASH_OFFSET_END     188
 #define FINAL_SCRYPT_OFFSET      188
 #define FINAL_SCRYPT_OFFSET_END  196
-#define SCRYPT_X_OFFSET          196
-#define SCRYPT_X_OFFSET_END      228
-#define TMP_SCRYPT_X_OFFSET      228
-#define TMP_SCRYPT_X_OFFSET_END  244
+#define TMP_SCRYPT_X_OFFSET      196 //228
+#define TMP_SCRYPT_X_OFFSET_END  212 //244
+#define SCRYPT_X_OFFSET          212 //196
+#define SCRYPT_X_OFFSET_END      244 //228
 #define SCRYPT_V_OFFSET          244
 #define SCRYPT_V_OFFSET_END      33012
 
-#define BLOCK_SIZE 33012.
-#define TEXTURE_SIZE %%TEXTURE_SIZE%%.
+
+const vec4 bin_encode = vec4(2.0, 4.0, 8.0, 16.0);
+const vec4 bin_recode = vec4(8.0, 4.0, 2.0, 1.0);
+
 
 vec4 toRGBA(vec2 arg) {
-      float V = float(arg.x);
-      float R = floor(V / POW_2_08);
-      V -= R * POW_2_08;
-      float G = V;
-      V = float(arg.y);
-      float B = floor(V / POW_2_08);
-      V -= B * POW_2_08;
-      float A = V;
-      return vec4(R/255., G/255., B/255., A/255.);
+	   vec2  RB = (floor(arg / 256.))/255.; 
+	   vec2  GA = (fract(arg / 256.)*256.)/255.;
+      return vec4(RB.x, GA.x, RB.y, GA.y);
 }

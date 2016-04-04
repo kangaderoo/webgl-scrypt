@@ -3,12 +3,12 @@ uniform vec2 header[19];
 uniform vec2 base_nonce;
 
 void main () {
-    vec4 c = gl_FragCoord - 0.5;
-    float position = (c.y * TEXTURE_SIZE) + c.x;
-    int offset = int(mod(position, BLOCK_SIZE));
-    float block = floor(position / BLOCK_SIZE);
+    vec4 c = floor(gl_FragCoord);
+    int position = int(c.y) * TEXTURE_SIZE + int(c.x);
+    int offset = int(mod(float(position), float(BLOCK_SIZE))+0.5);
+    int block = position / BLOCK_SIZE;
 
-    if ( TEXTURE_SIZE * TEXTURE_SIZE < (block + 1.) * BLOCK_SIZE ) {
+    if ( TEXTURE_SIZE * TEXTURE_SIZE < (block + 1) * BLOCK_SIZE ) {
         discard;
         return;
     }
@@ -22,7 +22,7 @@ void main () {
     } else if ( offset >= TMP_WORK_OFFSET && offset < TMP_WORK_OFFSET_END ) {
         for(int i = TMP_WORK_OFFSET; i < TMP_WORK_OFFSET_END; i++) {
             if ( i == offset ) {
-                gl_FragColor = toRGBA(header[i-TMP_WORK_OFFSET]);
+                gl_FragColor = toRGBA(header[i-TMP_WORK_OFFSET]).abgr;
             }
         }
     } else if ( offset >= NONCED_HEADER_OFFSET && offset < NONCED_HEADER_OFFSET_END ) {
@@ -30,12 +30,12 @@ void main () {
             //Copy whole header without last word
             for(int i = NONCED_HEADER_OFFSET; i < NONCED_HEADER_OFFSET_END - 1; i++) {
                 if ( i == offset ) {
-                    gl_FragColor = toRGBA(header[i-NONCED_HEADER_OFFSET]);
+                    gl_FragColor = toRGBA(header[i-NONCED_HEADER_OFFSET]).abgr;
                 }
             }
         } else  {
             //Set the nonce
-            gl_FragColor = toRGBA(safe_add(base_nonce, vec2(0., block))).abgr;
+            gl_FragColor = toRGBA(safe_add(base_nonce, vec2(0., block)));
         }
     } else if ( offset >= HEADER_HASH1_OFFSET && offset < HEADER_HASH1_OFFSET_END ) {
         for(int i = HEADER_HASH1_OFFSET; i < HEADER_HASH1_OFFSET_END; i++) {
@@ -48,12 +48,12 @@ void main () {
             //Copy rest three words
             for(int i = PADDED_HEADER_OFFSET; i < PADDED_HEADER_OFFSET + 3; i++) {
                 if ( i == offset ) {
-                    gl_FragColor = toRGBA(header[i+16-PADDED_HEADER_OFFSET]);
+                    gl_FragColor = toRGBA(header[i+16-PADDED_HEADER_OFFSET]).abgr;
                 }
             }
         } else if ( offset == PADDED_HEADER_OFFSET + 3 ) {
             //Set the nonce
-            gl_FragColor = toRGBA(safe_add(base_nonce, vec2(0., block))).abgr;
+            gl_FragColor = toRGBA(safe_add(base_nonce, vec2(0., block)));
         } else if ( offset == PADDED_HEADER_OFFSET + 4 ) {
             //last 1bit
             gl_FragColor = toRGBA(vec2(32768., 0.));

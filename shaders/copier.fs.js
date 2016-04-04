@@ -6,67 +6,65 @@
 #define REVERT_MODE 6
 #define SCRYPT_MODE 7
 
+/* Variables */
+uniform sampler2D uSampler;
+varying vec2 vTextCoord;
+
+uniform int source;
+uniform int destination;
+uniform int len;
+uniform int mode;
+uniform vec2 val;
+
+int start;
+
 vec2 fromRGBA(in vec4 rgba) {
-    rgba *= 255.;
+    rgba = floor(rgba*e255);
     float x = ((rgba.r * 256.) + rgba.g);
     float y = ((rgba.b * 256.) + rgba.a);
     return vec2(x, y);
 }
 
-#define PREDEFINED_BLOCKS 16.
-#define F_SCRYPT_V_OFFSET float(SCRYPT_V_OFFSET)
-
-/* Variables */
-uniform sampler2D uSampler;
-varying vec2 vTextCoord;
-
-uniform float source;
-uniform float destination;
-uniform float length;
-uniform int   mode;
-uniform vec2 value;
-
-float start;
-
-vec4 _(in float offset) {
-    vec2 coordinate = vec2(mod(start + offset, TEXTURE_SIZE), floor((start + offset)/TEXTURE_SIZE));
-    return texture2D(uSampler, coordinate / TEXTURE_SIZE);
+vec4 _(in int offset) {
+	 float loc = float(start+offset);
+    vec2 coordinate = vec2(floor(mod(loc, float(TEXTURE_SIZE))), floor(loc/float(TEXTURE_SIZE)));
+    return texture2D(uSampler, coordinate / float(TEXTURE_SIZE));
 }
 
-vec2 e(in float offset) {
+vec2 e(in int offset) {
     return fromRGBA(_(offset));
 }
 
 void main () {
-    vec4 c = gl_FragCoord - 0.5;
-    float position = (c.y * TEXTURE_SIZE) + c.x;
-    float offset = mod(position, BLOCK_SIZE);
-    float block = floor(position / BLOCK_SIZE);
+    vec4 c = floor(gl_FragCoord);
+    int position = int(c.y) * TEXTURE_SIZE + int(c.x);
+    int offset = int(mod(float(position), F_BLOCK_SIZE)+0.5);
+    int block = position / BLOCK_SIZE;
 
-    start = (block * BLOCK_SIZE);
-    float o = offset - destination;
-
-    if (offset >= destination && offset < (destination + length)) {
+    start = block * BLOCK_SIZE;
+    int o = offset - destination;
+	 
+    if (offset >= destination && offset < destination + len) {
         if ( mode == SUM_MODE ) {
             gl_FragColor = toRGBA(safe_add(e(offset), e(source + o)));
         } else if ( mode == XOR_MODE ) {
             gl_FragColor = toRGBA(xor(e(offset), e(source + o)));
         } else if ( mode == VALUE_MODE ) {
-            gl_FragColor = toRGBA(value);
+            gl_FragColor = toRGBA(val);
         } else if ( mode == REVERT_MODE ) {
             gl_FragColor = _(source + o).abgr;
         } else if ( mode == SCRYPT_MODE ) {
-            float k = floor(and16(e(destination + 16.).y, 1023.) * 32.);
-
-            gl_FragColor = toRGBA(xor(e(offset), e(F_SCRYPT_V_OFFSET + k + o)));
+            int k = int(and16(e(destination + 16).y, 1023.)+0.5) * 32;
+//            int k = int(fract(e(destination+16).y/1024.)*1024. + 0.5) * 32;
+            gl_FragColor = toRGBA(xor(e(offset), e(source + k + o)));
         } else {
             gl_FragColor = _(source + o);
         }
-    } else if (mode == HWORK_MODE && offset < destination + 16.) {
-        if (offset == destination + length) {
+    } else if (mode == HWORK_MODE && offset < destination + 16) {
+        if (offset == destination + len) {
             gl_FragColor = toRGBA(vec2(32768., 0.)); //last bit
-        } else if ( offset == destination + 15. ) {
-            gl_FragColor = toRGBA(value); //bits length
+        } else if (offset == destination + 15) {
+            gl_FragColor = toRGBA(val); //bits length
         } else {
             gl_FragColor = vec4(0.);
         }

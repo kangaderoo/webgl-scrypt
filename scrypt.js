@@ -1,4 +1,5 @@
 var t = 0, r = 0;
+
 /* SHA-256 related stuff */
 var h =  [0x6a09, 0xe667, 0xbb67, 0xae85,
           0x3c6e, 0xf372, 0xa54f, 0xf53a,
@@ -93,10 +94,11 @@ var _ = {
     INITIAL_HASH_OFFSET:    172,
     TEMP_HASH_OFFSET:       180,
     FINAL_SCRYPT_OFFSET:    188,
-    SCRYPT_X_OFFSET:        196,
-    TMP_SCRYPT_X_OFFSET:    228,
+    TMP_SCRYPT_X_OFFSET:    196,
+    SCRYPT_X_OFFSET:        212,
     SCRYPT_V_OFFSET:        244
 }
+
 _.BLOCKS_PER_TEXTURE = Math.floor(_.TEXTURE_SIZE*_.TEXTURE_SIZE/_.BLOCK_SIZE);
 _.SUBPIXEL = 1 / _.TEXTURE_SIZE; //Size of 0.5 pixel in float
 
@@ -138,7 +140,9 @@ function initGL() {
 }
 
 function establishProgram(vertex_shader, fragment_shader) {
-    var program = gl.createProgram(),
+//     console.log(vertex_shader);
+//     console.log(fragment_shader);
+     var program = gl.createProgram(),
         vShader = gl.createShader(gl.VERTEX_SHADER),
         vShaderSource = loadResource(vertex_shader),
         fShader = gl.createShader(gl.FRAGMENT_SHADER),
@@ -148,7 +152,7 @@ function establishProgram(vertex_shader, fragment_shader) {
 
     gl.shaderSource(vShader, vShaderSource);
     gl.compileShader(vShader);
-    if (!gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) {
+   if (!gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) {
         throw gl.getShaderInfoLog(vShader);
     }
     gl.attachShader(program, vShader);
@@ -244,24 +248,32 @@ function initTextures() {
 }
 
 /* Normalize function
-* Converts from pixels to normalized float from -1 to 1
+* Converts from pixels coordinates to normalized float from -1 to 1
+* The input of this function is actual pixels [0- TEXTURE_SIZE-1] for both X and Y.
+* It needs to be normalised to [-1,1] ... but the pixels should have a offset of 0.5 pixel.
 */
-function _n(points) {
+function _normalize(points) {
     for(var i in points) {
         var x = points[i],
             nX = x / (_.TEXTURE_SIZE - 1),
-            normalized = (nX * 2) - 1;
+            normalized = (nX * 2) - 1;            
 
-        //Add pixel correction for height coordinate
-        if (i % 2 != 0) {
-            var pixelCorrection = -1 * _.SUBPIXEL * normalized;
-            normalized += pixelCorrection;
-        }
+        var pixelCorrection = _.SUBPIXEL * normalized;
+  	     normalized -= pixelCorrection;
 
         points[i] = normalized;
     }
     return new Float32Array(points);
 }
+
+/*
+* Select what to render.
+* the canvas must be seen a shared memory, with the origin bottom left.
+* if the whole canvas needs to be rendered it will be done using triangles.
+* If only a selection needs to be rendered, as is usually the case when the canvas is used as memory
+* It will be done in lines.
+* Each line requires 4 elementes (xstart, ystart, xstop, ystop).
+*/
 
 function whatToRender(offset, length) {
     if(offset == "whole") {
@@ -278,7 +290,6 @@ function whatToRender(offset, length) {
     } else {
         var points = [];
         for(var i = 0; i < _.BLOCKS_PER_TEXTURE; i++) {
-        // for(var i = 0; i < 2; i++) {
             var total = (i*_.BLOCK_SIZE)+offset;
 
             var start_height = Math.floor(total / _.TEXTURE_SIZE),
@@ -296,7 +307,7 @@ function whatToRender(offset, length) {
                 points.push(start_height);
             } else {
                 //Add start height to the end of texture
-                points.push(_.TEXTURE_SIZE - 1);
+                points.push(_.TEXTURE_SIZE);
                 points.push(start_height);
 
                 start_height++;
@@ -305,7 +316,7 @@ function whatToRender(offset, length) {
                 while(start_height < end_height) {
                     points.push(0);
                     points.push(start_height);
-                    points.push(_.TEXTURE_SIZE - 1);
+                    points.push(_.TEXTURE_SIZE);
                     points.push(start_height);
 
                     start_height++;
@@ -323,7 +334,7 @@ function whatToRender(offset, length) {
         _.buffers.mode = gl.LINES;
 
         gl.bindBuffer(gl.ARRAY_BUFFER, _.buffers.vertices);
-        gl.bufferData(gl.ARRAY_BUFFER, _n(points), gl.STATIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, _normalize(points), gl.STATIC_DRAW);
     }
 }
 
@@ -374,7 +385,7 @@ function fillSHA256workProgram() {
         };
         return locations;
     }, function(round) {
-        gl.uniform1f(locations.round, round);
+        gl.uniform1i(locations.round, round);
     }, function() {
         gl.uniform1i(locations.sampler, 0);
     });
@@ -393,7 +404,7 @@ function computeSHA256Program() {
         };
         return locations;
     }, function(round) {
-        gl.uniform1f(locations.round, round);
+        gl.uniform1i(locations.round, round);
     }, function() {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, _.textures.K);
@@ -432,22 +443,22 @@ function copierProgram() {
         locations = {
             source:      gl.getUniformLocation(program, "source"),
             destination: gl.getUniformLocation(program, "destination"),
-            length:      gl.getUniformLocation(program, "length"),
+            len:         gl.getUniformLocation(program, "len"),
             mode:        gl.getUniformLocation(program, "mode"),
-            value:       gl.getUniformLocation(program, "value"),
+            val:         gl.getUniformLocation(program, "val"),
             sampler:     gl.getUniformLocation(program, "uSampler"),
         };
         return locations;
-    }, function(src, dst, length, mode, value) {
-        gl.uniform1f(locations.source, src);
-        gl.uniform1f(locations.destination, dst);
-        gl.uniform1f(locations.length, length);
+    }, function(src, dst, len, mode, val) {
+        gl.uniform1i(locations.source, src);
+        gl.uniform1i(locations.destination, dst);
+        gl.uniform1i(locations.len, len);
         gl.uniform1i(locations.mode, mode);
         if( mode == _.VALUE_MODE ) {
-            gl.uniform2f(locations.value, value[0], value[1]);
+            gl.uniform2f(locations.val, val[0], val[1]);
         }
         if( mode == _.HWORK_MODE ) {
-            gl.uniform2f(locations.value, 0, value);
+            gl.uniform2f(locations.val, 0, val);
         }
     }, function() {
         gl.uniform1i(locations.sampler, 0);
@@ -490,7 +501,7 @@ function salsaProgram() {
         return locations;
     }, function(part, round) {
         gl.uniform1f(locations.part, part);
-        gl.uniform1f(locations.round, round+1);
+        gl.uniform1i(locations.round, round+1);
     }, function() {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, _.textures.salsa);
@@ -500,6 +511,7 @@ function salsaProgram() {
         gl.uniform1i(locations.kSampler, 1);
     });
 }
+
 
 function program(name, fragment_code, locations, render, init) {
     var program = establishProgram("shaders/default-vs.js", fragment_code);
@@ -552,7 +564,7 @@ function match(name, expected, actual) {
     if ( expected == actual) {
         console.log(name + " match");
     } else {
-        console.log(name + " dismatch");
+        console.log(name + " mismatch");
         console.log("Actual: ");
         console.log(actual);
         console.log("Expected: ");
@@ -587,7 +599,7 @@ function sha256_round(target, dont_copy) {
         _.textures.swap();
         _.programs['copier'].render(target, _.TMP_HASH_OFFSET, 8, _.COPY_MODE);
     }
-    for(var i = 0; i < 32; i++) {
+    for(var i = 0; i < 8; i++) {
         _.textures.swap();
         _.programs['compute-sha256'].render(i);
     }
@@ -600,7 +612,7 @@ function sha256_round(target, dont_copy) {
     _.programs['texture-copy'].render();
 }
 
-function fillScryptX() {
+function PBKDF2_SHA256_80_128() {
     for( var i = 0; i < 4; i++ ) {
         /* TODO: iKey || Header round 1 is always the same */
         whatToRender(_.TMP_WORK_OFFSET, 16);
@@ -662,15 +674,16 @@ function salsa8(di, xi) {
     _.programs['copier'].render(_.SCRYPT_X_OFFSET + di, _.TMP_SCRYPT_X_OFFSET, 16, _.COPY_MODE);
 
     /* Generate salsa8 */
-    for (var q = 0; q < 4; q++) {
-        for (var j = 0; j < 2; j++) {
-            for (var i = 0; i < 4; i++) {
+    for (var q = 0; q < 4; q++) { // salsa double rounds
+        for (var j = 0; j < 2; j++) { // part
+            for (var i = 0; i < 4; i++) { // inner round
                 _.textures.swap();
                 _.programs['salsa'].render(j, i);
             }
         }
     }
 
+//    whatToRender(_.SCRYPT_X_OFFSET + di, 16);
     whatToRender(_.SCRYPT_X_OFFSET);
     _.textures.swap();
     _.programs['copier'].render(_.TMP_SCRYPT_X_OFFSET, _.SCRYPT_X_OFFSET + di, 16, _.SUM_MODE);
@@ -678,7 +691,7 @@ function salsa8(di, xi) {
     _.programs['texture-copy'].render();
 }
 
-function computeX() {
+function PBKDF2_SHA256_128_32() {
     //iKey || X round 1
     whatToRender(_.TMP_WORK_OFFSET, 16);
     _.textures.swap();
@@ -728,7 +741,7 @@ function computeX() {
 
     whatToRender(_.FINAL_SCRYPT_OFFSET, 8);
     _.textures.swap();
-    _.programs['copier'].render(_.TEMP_HASH_OFFSET, _.FINAL_SCRYPT_OFFSET, 8);
+    _.programs['copier'].render(_.TEMP_HASH_OFFSET, _.FINAL_SCRYPT_OFFSET, 8, _.REVERT_MODE);
 }
 
 $(function() {
@@ -738,6 +751,7 @@ $(function() {
     initTextures();
     initPrograms();
 
+
     var buf = new Uint8Array(textureSize * 4);
 
     console.log("Headers is " + header);
@@ -745,11 +759,12 @@ $(function() {
 
     console.log("Nonce is " + nonce);
     var nonce_bin = ___.hex_to_uint16_array(nonce.toString(16));
+//    console.log("Nonce bin is " + nonce_bin);
 
     var startTime = (new Date()).getTime();
 
     /* Fill both textures with initial values */
-    whatToRender(0, 180);
+    whatToRender(0, 180); //180
     _.textures.swap();
     _.programs['init-sha256'].render(header_bin.slice(0, 38), nonce_bin);
 
@@ -759,23 +774,29 @@ $(function() {
     /* initial tests */
     if (debug) {
         gl.readPixels(_.TMP_HASH_OFFSET, 0, 24, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Initial round", "6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd1902000000ff1fd715a981626682fd8d73afda09d825722d6ba5f665b1be6ed400242f7b650c3623c0f087fefdeefcd4c84d916a511551425fabaf52d55d559649", printBuffer(buf, 24));
+        match("Initial round", "6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd190000000215d71fff666281a9738dfd82d809daaf6b2d7225b165f6a500d46ebe657b2f24c023360cfdfe87f0c8d4fcee516a914d5f425115d552afab4996555d", printBuffer(buf, 24));
         gl.readPixels(_.NONCED_HEADER_OFFSET, 0, 20, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Nonced header", "02000000ff1fd715a981626682fd8d73afda09d825722d6ba5f665b1be6ed400242f7b650c3623c0f087fefdeefcd4c84d916a511551425fabaf52d55d5596498ba5f869f139d55346e2021b00039bfc", printBuffer(buf, 20));
+        match("Nonced header", "0000000215d71fff666281a9738dfd82d809daaf6b2d7225b165f6a500d46ebe657b2f24c023360cfdfe87f0c8d4fcee516a914d5f425115d552afab4996555d69f8a58b53d539f11b02e246fc9b0300", printBuffer(buf, 20));
         gl.readPixels(_.PADDED_HEADER_OFFSET, 0, 16, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Padded header", "8ba5f869f139d55346e2021b00039bfc800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280", printBuffer(buf, 16));
+        match("Padded header", "69f8a58b53d539f11b02e246fc9b0300800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280", printBuffer(buf, 16));
         gl.readPixels(_.IKEY_OFFSET, 0, 32, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
         match("iKey and oKey masks", "363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636365c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c", printBuffer(buf, 32));
         gl.readPixels(_.IKEY_HASH1_OFFSET, 0, 16, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
         match("iKey and oKey initial hashes", "6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd196a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd19", printBuffer(buf, 16));
     }
 
-    /* First round for key hash */
+    /* check what is in memory */
+
     sha256_round(_.HEADER_HASH1_OFFSET, true);
     if (debug) {
+        gl.readPixels(_.TMP_WORK_OFFSET, 0, 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("Extend message", "0000000215d71fff666281a9738dfd82d809daaf6b2d7225b165f6a500d46ebe657b2f24c023360cfdfe87f0c8d4fcee516a914d5f425115d552afab4996555dfda7836bf257dd09d7159fc60c2cc047ceb54e3e598fa7d3719c0520b52e212ca6026ececb8f701a8072d3e222a3fde793badef339103a2de5fada58328b83d1fa812d071525fbe16c63428b1a35f178154b89aed5b8aa142193d90b026cccf843b53cbc99cc6cb409eafb2c36c6fee6e040f1f2172916bd94270f437bb27d1bb930fcd15c37ab099433bc32d851cf55efc806532c89919f64960edff673f87dc7c1965b98f28ad85121158e005490cbf29163b2acb8659fcef680b70d2b3177", printBuffer(buf, 64));
         gl.readPixels(_.HEADER_HASH1_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Header base hash", "fd4fc824af9db9c0d882e8d70fd5d4a163ab22add3b7cd6dc336050003deca6e", printBuffer(buf, 8));
-    }
+        match("Header base hash", "d4d61d6f141d364266999d0dcb42d0f3d618577259648817c9b661580b4ca85d", printBuffer(buf, 8));
+        gl.readPixels(_.HEADER_HASH1_OFFSET + _.BLOCK_SIZE, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("Header base(2) hash", "d4d61d6f141d364266999d0dcb42d0f3d618577259648817c9b661580b4ca85d", printBuffer(buf, 8));
+    }    
+
 
     /* Final round for key hash */
     //Copy first round hash to destination position
@@ -791,12 +812,25 @@ $(function() {
     _.textures.swap();
     _.programs['texture-copy'].render();
 
+/* check the copy function */
+    if (debug) {
+        gl.readPixels(_.HMAC_KEY_HASH_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("hmac work", "d4d61d6f141d364266999d0dcb42d0f3d618577259648817c9b661580b4ca85d", printBuffer(buf, 8));
+        gl.readPixels(_.TMP_WORK_OFFSET, 0, 16, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("tmp work offset", "69f8a58b53d539f11b02e246fc9b0300800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280", printBuffer(buf, 16));
+        gl.readPixels(244 + _.TMP_WORK_OFFSET, 32, 16, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("tmp work (2) offset", "69f8a58b53d539f11b02e246fc9b0301800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280", printBuffer(buf, 16));
+    }
+
     sha256_round(_.HMAC_KEY_HASH_OFFSET);
 
     if (debug) {
         gl.readPixels(_.HMAC_KEY_HASH_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Final hash", "54e2fc0ab1d0c524d24ee13c0dee324776c878d419344ac35b995640eab1371c", printBuffer(buf, 8));
+        match("HMAC hash", "cdcacb050c7882ec305f3f0fe7ed3fef64b94e7e4e5a7de1f10920e3ac432ee7", printBuffer(buf, 8));
+        gl.readPixels(244 +_.HMAC_KEY_HASH_OFFSET, 32, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("HMAC (2) hash", "68d17591b3d1772dabfd9bf048ebe43e04c76cfbc6c077b7fa6bb09fa67ad566", printBuffer(buf, 8));
     }
+
 
     whatToRender(_.IKEY_OFFSET, 32);
     /* Create iKey */
@@ -811,7 +845,7 @@ $(function() {
 
     if (debug) {
         gl.readPixels(_.IKEY_OFFSET, 0, 32, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("iKey/oKey", "62d4ca3c87e6f312e478d70a3bd8047140fe4ee22f027cf56daf6076dc87012a363636363636363636363636363636363636363636363636363636363636363608bea056ed8c99788e12bd6051b26e1b2a9424884568169f07c50a1cb6ed6b405c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c", printBuffer(buf, 32));
+        match("iKey/oKey", "fbfcfd333a4eb4da06690939d1db09d9528f7848786c4bd7c73f16d59a7518d13636363636363636363636363636363636363636363636363636363636363636919697595024deb06c036353bbb163b338e51222120621bdad557cbff01f72bb5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c", printBuffer(buf, 32));
     }
 
     /* Create iKey initial hash */
@@ -823,7 +857,7 @@ $(function() {
     sha256_round(_.IKEY_HASH1_OFFSET);
     if (debug) {
         gl.readPixels(_.IKEY_HASH1_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("iKey base hash", "1810219db381a5578d2a3163f1c8300d31dffbcd47d7cad0c2f2be550f287816", printBuffer(buf, 8));
+        match("iKey base hash", "5d52d0fb89dddc536211009112824b29bc744de14a3baad36b653e3a69be1a87", printBuffer(buf, 8));
     }
 
     /* Create oKey initial hash */
@@ -835,13 +869,14 @@ $(function() {
     sha256_round(_.OKEY_HASH1_OFFSET);
     if (debug) {
         gl.readPixels(_.OKEY_HASH1_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("oKey base hash", "14d07616f180c5531ea198c14c20997445b7cf0cfc90d3650e59c6a1af3626a2", printBuffer(buf, 8));
+        match("oKey base hash", "69275eab6dfc79a559fda62ecb0c2d568d5f84108b770b699f809fb07164c3d3", printBuffer(buf, 8));
     }
 
-    fillScryptX();
+    PBKDF2_SHA256_80_128();
+
     if (debug) {
         gl.readPixels(_.SCRYPT_X_OFFSET, 0, 32, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Scrypt X", "65e8bba22ac94d38e28aa9b7f3005501abb5bad0a01ddd9e0ff0b241cea4b85163a5c4366f372bb6aff7ecf17a377087dfa2f06185cccfc5454fa183b0a61179ce4a765393e2605646d993b7348dc902203e59f65510feb509c448cf12895a6e228989e52be2fc021ca36fd4d8342ecaabd4fe15feada69d114728f4dd77033c", printBuffer(buf, 32));
+        match("PBKDF2_SHA256_80_128 X", "e0b2ee81237a5ac5437320030e419227dfd94b8a4697d524c42743237edb7d3d01c2cd6d6bc5d75bd96384193eeaf76be7d2684ce79b20db51c79a8c8c702885f50fa032bf96e1213b2f7e4e685215c63c18fff6a41dd125d2e88c79755dc8775712e340be29f0ad66b0679931dcb857f2c9ee9020c1a997f13013f916286784", printBuffer(buf, 32));
     }
 
     for(var i = 0; i < 1024; i++) {
@@ -858,34 +893,34 @@ $(function() {
 
     if (debug) {
         gl.readPixels(_.SCRYPT_X_OFFSET, 0, 32, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("1024 salsa rounds", "df29c599f41f175b62737cd533e7adce586bbddaeaef3ba7ffd1be591dceaaba9822ef2d0438f00e992ab4bcf5cf0942ab0439bac73e761c2472db0cfc170b44fcf1cc3e8d03c71d4a3a54b63220d201d82ea8ed22b8a5138123adafb00c3d1a5640c5683766cc2fd2fd009531222e99e4fba360412ec7bbd70b327644a4aebb", printBuffer(buf, 32));
+        match("1024 salsa fill rounds", "c1d658b2eba280fa036b9ddbd2161cfb777edca3a8eecd04a34f986254c51f6439727e328eaa3d2192f3455289f6bffd8a6d0e0e347922581af5fd143b9b0c10f1eecf8042d2d6ebb94220a80ab006d69732075b155df2bec49fc4916ff27cb778fc0f110a30c4033e2a02c2ddbe9193372c315877c36ade56f8d12d32f2f33b", printBuffer(buf, 32));
 
         gl.readPixels(_.SCRYPT_V_OFFSET, 0, 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("First 64 words of V", "65e8bba22ac94d38e28aa9b7f3005501abb5bad0a01ddd9e0ff0b241cea4b85163a5c4366f372bb6aff7ecf17a377087dfa2f06185cccfc5454fa183b0a61179ce4a765393e2605646d993b7348dc902203e59f65510feb509c448cf12895a6e228989e52be2fc021ca36fd4d8342ecaabd4fe15feada69d114728f4dd77033c6ccb9335ef55d24890a1dcb7c20e9f0a2cebec8625eb8dba76c81743149eac799fb212d323b424207119baf1158bbce20cbb9f4584db1da8d67e62fa2c2a2555a45dee8fe66edef4ca83cf19ea304f683ffa2a195d446e9b1240dda69decf03327eb8821fc1590da0a751a958c7476e6817a8dfe8a5f1bd7dc86500d89b3279c", printBuffer(buf, 64));
+        match("First 64 words of V", "e0b2ee81237a5ac5437320030e419227dfd94b8a4697d524c42743237edb7d3d01c2cd6d6bc5d75bd96384193eeaf76be7d2684ce79b20db51c79a8c8c702885f50fa032bf96e1213b2f7e4e685215c63c18fff6a41dd125d2e88c79755dc8775712e340be29f0ad66b0679931dcb857f2c9ee9020c1a997f13013f916286784af3acf0d3a6f02f56da8a2300ae8b4d3b35b51bab459a82582569657301c4d74aa02889a5dc59197e760e99baa3521cc6f076b1a73eca71303bdb55a420b3d79acc745e663104b61be8bc7ba00486e682e5eb309b61bbb3858293f7ce12a1f526fc21b7526ba60fb0cdbfdeb4fc8e4503c292e92bf67987d2c6c80f82b4f5de8", printBuffer(buf, 64));
+
+        gl.readPixels(244-64, 32, 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("Last 64 words of V", "410c18a4584e376321e37485b92ccdded927d61ab188c50ba8495e45b5fa18b841c8be1a11ef67185cfebfa8fd543f9dbfa41b38e19c566c357701c1cc446721a6da86180209fffdb41af10c4852358ed61d3a2456b636287ffcabafdb0eaa0fd61ca07965fbb6b86906b372ba2802e226e4d9b2883df19430c1d51759b20c09897f07a5f027b8227b413e6da02548be63063fb9bc737b43dcea0b274013b0fa8571643ef3260c72867efb6b59158c2c68e1887c0c685015674ddaf324789062c809ec3f04a260bb33aaa8519689180490a0aa043fc32e189e193470386db0de981f5d6ff1bc37e08d967448800a90f8eb4193c725d2305d4264b6e08950a229", printBuffer(buf, 64));
+  
     }
-
-    whatToRender("whole");
-    _.textures.swap();
-    _.programs['texture-copy'].render();
-
 
     for(var i = 0; i < 1024; i++) {
         whatToRender(_.SCRYPT_X_OFFSET, 32);
         _.textures.swap();
-        _.programs['copier'].render(null, _.SCRYPT_X_OFFSET, 32, _.SCRYPT_MODE);
+        _.programs['copier'].render(_.SCRYPT_V_OFFSET, _.SCRYPT_X_OFFSET, 32, _.SCRYPT_MODE);
         _.textures.swap();
         _.programs['texture-copy'].render();
 
         salsa8(0, 16);
         salsa8(16, 0);
+
     }
 
     if (debug) {
         gl.readPixels(_.SCRYPT_X_OFFSET, 0, 32, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("Restore to X", "1f39e39a9d78e53adadafc030499012f187501d0b23ab166f39296dfe0b75b4bc9e91c0c40d8feafe4d543c8649b2ee145415ffbf90358e980c3d0c2aab0b7a1161b459166df29cb172ba08de0c522c71cd3bf416e0b6931eb39c18eaf0d49efa33f5693997eb9e90d37a1b76a4c887ac61beb75cafa253859f18f262680e5f6", printBuffer(buf, 32));
+        match("1024 salsa mix rounds", "3cffe0c1d99da5920b4509bff9a5f466f9c705f20c87499662f91451f441ed24ee4ed792e3b66ea5107733009d4b2a5e664e3ce334d5d3cdbaa373eccd0a550e6050007105427ff48a00d6b1646cc5f6b3593282f5634ba21f1059e6c12e8bc9039bd30217b0a411514e7123d87566b7be7455a5eaed5ed102d141eda36bdcb6", printBuffer(buf, 32));
     }
 
-    computeX();
+    PBKDF2_SHA256_128_32();
 
     whatToRender("whole");
     _.textures.swap();
@@ -893,19 +928,25 @@ $(function() {
     _.programs['texture-copy'].render();
 
     gl.readPixels(_.FINAL_SCRYPT_OFFSET, 0, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-    match("SCRYPT HASH", "c75792640f558294e4cb2dd70f3c898c47221f1803452ef8f42dd932a6180000", printBuffer(buf, 8));
+    match("SCRYPT HASH", "aeb94ea4a527ee1c962befe936f880d0372371aa84c6be561b579729600bf550", printBuffer(buf, 8));
     console.log("Scrypt hash is " + printBuffer(buf, 8));
 
     if (debug) {
+		  /* use 32 for y here if the canvas = 1024 */
+		  /* for different canvas, second, third etc block x and y need to be calculated */
         gl.readPixels(244 + _.FINAL_SCRYPT_OFFSET, 32, 8, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("SECOND SCRYPT HASH", "1630ffa9ad818041406d49aa7ebf2bdda49f76d4d6cc0ac9d22b9e5aaed296c2", printBuffer(buf, 8));
+        match("SECOND SCRYPT HASH", "ed0b4a8ab112ec8cdc6ff290e561cf4be9a90f49681f6d3f299f91121f31a1f9", printBuffer(buf, 8));
+
+        gl.readPixels(_.NONCED_HEADER_OFFSET, 0, 20, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        match("FIRST Nonced header", "0000000215d71fff666281a9738dfd82d809daaf6b2d7225b165f6a500d46ebe657b2f24c023360cfdfe87f0c8d4fcee516a914d5f425115d552afab4996555d69f8a58b53d539f11b02e246fc9b0300", printBuffer(buf, 20));
 
         gl.readPixels(244 + _.NONCED_HEADER_OFFSET, 32, 20, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        match("SECOND Nonced header", "02000000ff1fd715a981626682fd8d73afda09d825722d6ba5f665b1be6ed400242f7b650c3623c0f087fefdeefcd4c84d916a511551425fabaf52d55d5596498ba5f869f139d55346e2021b01039bfc", printBuffer(buf, 20));
+        match("SECOND Nonced header", "0000000215d71fff666281a9738dfd82d809daaf6b2d7225b165f6a500d46ebe657b2f24c023360cfdfe87f0c8d4fcee516a914d5f425115d552afab4996555d69f8a58b53d539f11b02e246fc9b0301", printBuffer(buf, 20));
     }
-
+ 
     var msecTime = (((new Date()).getTime())-startTime);
     console.log("Running time: " + msecTime + "ms");
 
-    console.log(t + " texture swaps ans " + r + " renders");
+    console.log(t + " texture swaps and " + r + " renders");
+
 });
